@@ -2,7 +2,9 @@
 author:         Tola Shobande
 name:           model.py
 date:           4/09/2024
-description:
+description:    This script defines a custom image classification model based on the ResNet-50 architecture with an 
+                option to freeze its pre-trained weights and a custom fully connected layer for a specific number of
+                classes. The script includes utility functions to instantiate, load, and save the model.
 """
 
 import torch
