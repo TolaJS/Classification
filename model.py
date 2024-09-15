@@ -28,7 +28,7 @@ class Classifier(nn.Module):
         The number of classes for the classification task.
     """
 
-    def __init__(self, num_classes, freeze_weights=True):
+    def __init__(self, num_classes: int, freeze_weights=True):
         super(Classifier, self).__init__()
         self.model = models.resnet50(weights="IMAGENET1K_V2")
 
