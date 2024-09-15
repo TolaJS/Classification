@@ -13,8 +13,9 @@ from torchvision import datasets, transforms as T
 
 
 class ProjectDataset:
-    def __init__(self, mode, root_dir, split_ratio=(0.7, 0.2, 0.1)):
+    def __init__(self, mode, root_dir, seed, split_ratio=(0.7, 0.2, 0.1)):
         self.mode = mode
+        self.seed = seed
         self.root_dir = root_dir
         self.split_ratio = split_ratio
         self.full_dataset = datasets.ImageFolder(root_dir, transform=self.data_transforms())
@@ -38,7 +39,9 @@ class ProjectDataset:
         or remove the ones unnecessary for training.
         2. For validation mode: Applies only resizing and normalization.
 
-        :return: A torchvision.transforms.Compose object containing the appropriate sequence of transformations based on the current mode (train or val).
+        :return:
+            A torchvision.transforms.Compose object containing the appropriate sequence of transformations based on the
+            current mode (train or val).
         """
         if self.mode == 'train':
             transforms = [
@@ -69,7 +72,7 @@ class ProjectDataset:
         train_len = int(len(dataset) * self.split_ratio[0])
         val_len = int(len(dataset) * self.split_ratio[1])
         test_len = len(dataset) - train_len - val_len
-        torch.manual_seed(7)
+        torch.manual_seed(self.seed)
 
         train_dataset, val_dataset, test_dataset = random_split(dataset, [train_len, val_len, test_len])
         return train_dataset, val_dataset, test_dataset
@@ -77,6 +80,7 @@ class ProjectDataset:
     def __len__(self):
         """
         Returns the number of samples in the assigned dataset.
+        :returns: int: The number of samples in the dataset.
         """
         return len(self.dataset)
 

@@ -12,11 +12,35 @@ import logging
 from model import Classifier
 from data import ProjectDataset
 from torch.utils.data import DataLoader
+from timm.utils import AverageMeter
 from torch.utils.tensorboard import SummaryWriter
 
 
-def train():
-    pass
+def train(train_loader, model, criterion, optimiser, epoch, scaler, scheduler, device):
+    model.train()
+    losses = AverageMeter()
+    writer = SummaryWriter(log_dir=f"logs/epoch_{epoch}")
+
+    for batch_idx, (inputs, targets) in enumerate(train_loader):
+        inputs, targets = inputs.to(device), targets.to(device)
+
+        optimiser.zero_grad()
+        with torch.cuda.amp.autocast():
+            outputs = model(inputs)
+            loss = criterion(outputs, targets)
+
+        scaler.scale(loss).backward()
+        scaler.step(optimiser)
+        scaler.update()
+
+        losses.update(loss.item(), inputs.size(0))
+
+    scheduler.step()
+
+    writer.add_scalar('Loss/epoch_train', losses.avg, epoch)
+    logging.info(f"Epoch [{epoch}] - Loss: {losses.avg:.4f}")
+    writer.close()
+
 
 
 def evaluate():
@@ -28,6 +52,10 @@ def test():
 
 
 def main():
+    """
+
+    :return:
+    """
     """Data Loading"""
     train_data = ProjectDataset(mode='train', root_dir='dataset', seed=args.seed)
     train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True)
@@ -49,7 +77,8 @@ def main():
     model = Classifier(num_classes=args.num_classes)
     model.to(device)
 
-    """Optimiser"""
+    """Parameters"""
+    #   OPTIMISER
     base_params = [  # Parameters in the model except FC layer
         param for name, param in model.named_parameters() if "fc" not in str(name)
     ]
