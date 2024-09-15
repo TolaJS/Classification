@@ -18,29 +18,36 @@ from torch.utils.tensorboard import SummaryWriter
 
 def train(train_loader, model, criterion, optimiser, epoch, scaler, scheduler, device):
     model.train()
-    losses = AverageMeter()
+    losses = AverageMeter()  # Track the average loss
     writer = SummaryWriter(log_dir=f"logs/epoch_{epoch}")
 
+    #   Pass inputs and targets to correct device
     for batch_idx, (inputs, targets) in enumerate(train_loader):
         inputs, targets = inputs.to(device), targets.to(device)
 
+        #   Zero the parameter gradient
         optimiser.zero_grad()
+
+        #   Forward pass
         with torch.cuda.amp.autocast():
             outputs = model(inputs)
             loss = criterion(outputs, targets)
 
+        #   Backward pass and optimiser step
         scaler.scale(loss).backward()
         scaler.step(optimiser)
         scaler.update()
 
+        #   Metrics Update
         losses.update(loss.item(), inputs.size(0))
 
+    #   Update scheduler
     scheduler.step()
 
+    #   Log average loss to Tensorboard
     writer.add_scalar('Loss/epoch_train', losses.avg, epoch)
     logging.info(f"Epoch [{epoch}] - Loss: {losses.avg:.4f}")
     writer.close()
-
 
 
 def evaluate():
