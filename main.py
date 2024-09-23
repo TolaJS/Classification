@@ -7,8 +7,8 @@ description:    ...
 
 import os
 import args
-import torch
 import logging
+import torch
 from datetime import datetime
 from tqdm import tqdm
 from model import Classifier
@@ -20,16 +20,17 @@ from utils import *
 from torch.utils.tensorboard import SummaryWriter
 
 
-def train(train_loader, model, criterion, optimiser, epoch, scaler, scheduler, device):
+def train(train_loader, model, criterion, optimiser, scaler, scheduler, device, epoch, val_acc):
     """
-    :param train_loader:
+    :param train_loader: training data loader
     :param model:
     :param criterion:
     :param optimiser:
-    :param epoch:
     :param scaler:
     :param scheduler:
     :param device:
+    :param epoch:
+    :param val_acc:
     :return:
     """
     model.train()
@@ -37,10 +38,12 @@ def train(train_loader, model, criterion, optimiser, epoch, scaler, scheduler, d
     metrics_tracker = MetricTracker(args.num_classes)
     correct = 0
     total = 0
+    counter = 0
 
     #   Pass images and labels to correct device
     for images, labels in tqdm(train_loader, desc="Training"):
         images, labels = images.to(device), labels.to(device)
+        counter += 1
 
         #   Zero the parameter gradient
         optimiser.zero_grad()
@@ -51,11 +54,6 @@ def train(train_loader, model, criterion, optimiser, epoch, scaler, scheduler, d
             loss = criterion(outputs, labels)
 
         #   Backward pass and optimiser step
-        #   TODO Try this later without scaler to see the difference
-        """
-        loss.backward()
-        optimiser.step()
-        """
         scaler.scale(loss).backward()
         scaler.step(optimiser)
         scaler.update()
@@ -70,22 +68,20 @@ def train(train_loader, model, criterion, optimiser, epoch, scaler, scheduler, d
     #   Update scheduler
     scheduler.step()
 
-    # todo figure out how to use logging
-    # logging.info(f"Epoch [{epoch}] - Loss: {losses.avg:.4f}")
+    log = format_log_message(mode='Train', i=counter, epoch=epoch, loss=losses.avg, acc=val_acc)
+    logging.info(log)
+
     train_accuracy = 100 * (correct / total)
     metrics = metrics_tracker.compute()
     metrics_tracker.reset()
     return losses.avg, train_accuracy, metrics
 
 
-def test(test_loader, model, criterion, epoch, train_loss, start, device, eval_mode=True):
+def test(test_loader, model, criterion, device, eval_mode=True):
     """
     :param test_loader:
     :param model:
     :param criterion:
-    :param epoch:
-    :param train_loss:
-    :param start:
     :param device:
     :param eval_mode:
     :return:
@@ -111,19 +107,15 @@ def test(test_loader, model, criterion, epoch, train_loss, start, device, eval_m
             total += labels.size(0)
             correct += predicted.eq(labels.data).sum().item()
 
-    train_accuracy = 100 * (correct / total)
+    test_accuracy = 100 * (correct / total)
     metrics = metrics_tracker.compute()
     metrics_tracker.reset()
     if eval_mode:
-        return losses.avg, train_accuracy
-    return train_accuracy, metrics
+        return losses.avg, test_accuracy
+    return test_accuracy, metrics
 
 
 def main():
-    """
-    TODO Sort out and understand the tensorboard logging
-    :return:
-    """
     """Data Loading"""
     train_data = ProjectDataset(mode='train', root_dir='dataset', seed=args.seed)
     train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True)
@@ -145,8 +137,8 @@ def main():
     model = Classifier(num_classes=args.num_classes)
     model.to(device)
 
-    if not os.path.exists("./logs/"):
-        os.mkdir("./logs/")
+    if not os.path.exists("./checkpoints/"):
+        os.mkdir("./checkpoints/")
 
     """Parameters"""
     #   OPTIMISER
@@ -155,20 +147,61 @@ def main():
     ]
 
     optimiser = torch.optim.Adam(
-        [
+        params=[
             {"params": base_params},
             {"params": model.model.fc.parameters(), "lr": 0.01},
         ],
         lr=args.lr,
         weight_decay=args.weight_decay,
     )
+    #   SCHEDULER
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimiser, gamma=args.gamma)
+    #   LOSS
+    criterion = torch.nn.CrossEntropyLoss()
+    #   SCALER
+    scaler = torch.cuda.amp.GradScaler()
 
     log_dir = (f"logs/runs/"
                f"{model.__class__.__name__}/"
                f"lr_{args.lr}_bs_{args.batch_size}/"
                f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}_"
                f"{uuid4().hex[:6]}")
-    writer = SummaryWriter(log_dir)  # todo fix the positioning of this later
+    writer = SummaryWriter(log_dir)
+    logging.basicConfig(filename=log_dir, level=logging.INFO)
+
+    #   EXECUTION
+    if not args.eval_mode:
+        if args.model_path:
+            model.load_state_dict(torch.load(args.model_path))
+            model.to(device)
+        else:
+            raise ValueError("Model path not set in args.py")
+        test_accuracy, test_metrics = test(test_loader, model, criterion, device, args.eval_mode)
+
+        print("Top-1 Accuracy: {:.2f}%".format(test_metrics['top1_acc']))
+        print("Top-5 Accuracy: {:.2f}%".format(test_metrics['top5_acc']))
+        print("F1-Score: {:.2f}%".format(test_metrics['f1']))
+        logging.info("Top-1 Accuracy: {:.2f}%".format(test_metrics['top1_acc']))
+        logging.info("Top-5 Accuracy: {:.2f}%".format(test_metrics['top5_acc']))
+        logging.info("F1-Score: {:.2f}%".format(test_metrics['f1']))
+    else:
+        val_acc = 0
+        for epoch in range(args.epochs):
+            train_loss, train_acc, train_metrics = train(train_loader, model, criterion, optimiser,
+                                                         scaler, scheduler, device, epoch+1, val_acc)
+            val_loss, val_acc = test(val_loader, model, criterion, device)
+
+            writer.add_scalar('Train/Loss', train_loss, epoch)
+            writer.add_scalar('Train/Accuracy', train_acc, epoch)
+            writer.add_scalar('Train/Top-1 Accuracy', train_metrics['top1_acc'], epoch)
+            writer.add_scalar('Train/Top-5 Accuracy', train_metrics['top5_acc'], epoch)
+            writer.add_scalar('Train/F1-Score', train_metrics['f1'], epoch)
+            writer.add_scalar('Val/Loss', val_loss, epoch)
+            writer.add_scalar('Val/mAP', val_acc, epoch)
+
+            filename = f"Model-lr_{args.lr}_bs_{args.batch_size}-E{epoch + 1}.pth"
+            save_path = os.path.join(args.save_path, filename)
+            torch.save(model.state_dict(), save_path)
 
 
 if __name__ == '__main__':

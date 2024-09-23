@@ -13,3 +13,6 @@ gamma = 0
 epochs = 0
 num_classes = 0
 weight_decay = 0
+eval_mode = True
+save_path = "./checkpoints/"
+model_path = "./checkpoints/"
