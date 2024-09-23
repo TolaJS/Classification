@@ -10,7 +10,6 @@ import args
 import logging
 import torch
 from datetime import datetime
-from tqdm import tqdm
 from model import Classifier
 from uuid import uuid4
 from data import ProjectDataset
@@ -19,8 +18,11 @@ from timm.utils import AverageMeter
 from utils import *
 from torch.utils.tensorboard import SummaryWriter
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger('Log')
 
-def train(train_loader, model, criterion, optimiser, scaler, scheduler, device, epoch, val_acc):
+
+def train(train_loader, model, criterion, optimiser, scaler, scheduler, device, epoch):
     """
     :param train_loader: training data loader
     :param model:
@@ -30,20 +32,17 @@ def train(train_loader, model, criterion, optimiser, scaler, scheduler, device, 
     :param scheduler:
     :param device:
     :param epoch:
-    :param val_acc:
     :return:
     """
     model.train()
     losses = AverageMeter()  # Track the average loss
-    metrics_tracker = MetricTracker(args.num_classes)
+    metrics_tracker = MetricTracker(args.num_classes).to(device)
     correct = 0
     total = 0
-    counter = 0
 
     #   Pass images and labels to correct device
-    for images, labels in tqdm(train_loader, desc="Training"):
+    for i, (images, labels) in enumerate(train_loader):
         images, labels = images.to(device), labels.to(device)
-        counter += 1
 
         #   Zero the parameter gradient
         optimiser.zero_grad()
@@ -65,11 +64,13 @@ def train(train_loader, model, criterion, optimiser, scaler, scheduler, device, 
         total += labels.size(0)
         correct += predicted.eq(labels.data).sum().item()
 
+        metrics = metrics_tracker.compute()
+        log = format_log_message(mode='Train', i=i, epoch=epoch, loss=losses.avg, acc=100 * (correct / total),
+                                 top1=metrics['top1_acc'], top5=metrics['top5_acc'], f1=metrics['f1'])
+        logger.info(log)
+
     #   Update scheduler
     scheduler.step()
-
-    log = format_log_message(mode='Train', i=counter, epoch=epoch, loss=losses.avg, acc=val_acc)
-    logging.info(log)
 
     train_accuracy = 100 * (correct / total)
     metrics = metrics_tracker.compute()
@@ -91,10 +92,9 @@ def test(test_loader, model, criterion, device, eval_mode=True):
     metrics_tracker = MetricTracker(args.num_classes)
     correct = 0
     total = 0
-    desc = "Evaluating" if eval_mode else "Testing"
 
     with torch.no_grad():
-        for images, labels in tqdm(test_loader, desc=desc):
+        for images, labels in test_loader:
             images, labels = images.to(device), labels.to(device)
 
             with torch.cuda.amp.autocast():
@@ -119,12 +119,15 @@ def main():
     """Data Loading"""
     train_data = ProjectDataset(mode='train', root_dir='dataset', seed=args.seed)
     train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True)
+    train_len = len(train_loader.dataset)
 
     val_data = ProjectDataset(mode='val', root_dir='dataset', seed=args.seed)
     val_loader = DataLoader(val_data, batch_size=args.batch_size, shuffle=False)
+    val_len = len(val_loader.dataset)
 
     test_data = ProjectDataset(mode='test', root_dir='dataset', seed=args.seed)
     test_loader = DataLoader(test_data, batch_size=args.batch_size, shuffle=False)
+    test_len = len(test_loader.dataset)
 
     """Model Initialisation"""
     if torch.cuda.is_available():
@@ -136,9 +139,10 @@ def main():
 
     model = Classifier(num_classes=args.num_classes)
     model.to(device)
+    model_name = model.model.__class__.__name__
 
-    if not os.path.exists("./checkpoints/"):
-        os.mkdir("./checkpoints/")
+    if not os.path.exists("./checkpoint/"):
+        os.mkdir("./checkpoint/")
 
     """Parameters"""
     #   OPTIMISER
@@ -167,7 +171,8 @@ def main():
                f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}_"
                f"{uuid4().hex[:6]}")
     writer = SummaryWriter(log_dir)
-    logging.basicConfig(filename=log_dir, level=logging.INFO)
+    handler = logging.FileHandler(f'{log_dir}/log.txt')
+    logger.addHandler(handler)
 
     #   EXECUTION
     if not args.eval_mode:
@@ -178,17 +183,17 @@ def main():
             raise ValueError("Model path not set in args.py")
         test_accuracy, test_metrics = test(test_loader, model, criterion, device, args.eval_mode)
 
-        print("Top-1 Accuracy: {:.2f}%".format(test_metrics['top1_acc']))
-        print("Top-5 Accuracy: {:.2f}%".format(test_metrics['top5_acc']))
-        print("F1-Score: {:.2f}%".format(test_metrics['f1']))
-        logging.info("Top-1 Accuracy: {:.2f}%".format(test_metrics['top1_acc']))
-        logging.info("Top-5 Accuracy: {:.2f}%".format(test_metrics['top5_acc']))
-        logging.info("F1-Score: {:.2f}%".format(test_metrics['f1']))
+        print_summary(logger, model_name, train_len, val_len, test_len)
+        logger.info("=> Testing Results")
+        logger.info("Top-1 Accuracy: {:.2f}%".format(test_metrics['top1_acc']))
+        logger.info("Top-5 Accuracy: {:.2f}%".format(test_metrics['top5_acc']))
+        logger.info("F1-Score: {:.2f}%".format(test_metrics['f1']))
     else:
-        val_acc = 0
+        print_summary(logger, model_name, train_len, val_len, test_len)
+        logger.info("=> Start Training")
         for epoch in range(args.epochs):
             train_loss, train_acc, train_metrics = train(train_loader, model, criterion, optimiser,
-                                                         scaler, scheduler, device, epoch+1, val_acc)
+                                                         scaler, scheduler, device, epoch + 1)
             val_loss, val_acc = test(val_loader, model, criterion, device)
 
             writer.add_scalar('Train/Loss', train_loss, epoch)
@@ -197,9 +202,9 @@ def main():
             writer.add_scalar('Train/Top-5 Accuracy', train_metrics['top5_acc'], epoch)
             writer.add_scalar('Train/F1-Score', train_metrics['f1'], epoch)
             writer.add_scalar('Val/Loss', val_loss, epoch)
-            writer.add_scalar('Val/mAP', val_acc, epoch)
+            writer.add_scalar('Val/Accuracy', val_acc, epoch)
 
-            filename = f"Model-lr_{args.lr}_bs_{args.batch_size}-E{epoch + 1}.pth"
+            filename = f"Model-{model_name}-lr_{args.lr}_bs_{args.batch_size}-E{epoch + 1}.pth"
             save_path = os.path.join(args.save_path, filename)
             torch.save(model.state_dict(), save_path)
 
