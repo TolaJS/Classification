@@ -67,31 +67,3 @@ def get_model(num_classes, freeze_weights=True):
         A Classifier object initialized with `num_classes` and `freeze_weights` arguments.
     """
     return Classifier(num_classes=num_classes, freeze_weights=freeze_weights)
-
-
-def load_model(num_classes, path):
-    """
-    Loads a pre-trained model's saved weights from a specified path and initializes
-    it with a given number of classes.
-    :param num_classes: int:
-        The number of classes for the classification task.
-    :param path: str:
-        The path models saved weights.
-    :returns: torch.nn.Module:
-        The loaded pre-trained model.
-    """
-    model = get_model(num_classes)
-    model.load_state_dict(torch.load(path))
-    return model
-
-
-def save_model(model, path):
-    """
-    Saves the state of a given model to the specified file path.
-    :param model: torch.nn.Module:
-        The PyTorch model whose state will be saved.
-    :param path: str:
-        The file path where the model's state dictionary will be saved. The path should
-        include the file name and extension, e.g., 'model.pth'.
-    """
-    torch.save(model.state_dict(), path)
