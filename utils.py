@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import random
 import torchmetrics
+import args
 
 
 def set_seed(seed_value):
@@ -42,3 +43,7 @@ class MetricTracker:
         self.accuracy.reset()
         self.top5_accuracy.reset()
         self.f1_score.reset()
+
+
+def format_log_message(mode, i, epoch, loss, acc):
+    return f'| Mode:{mode:<5} | Iter:{i:5.1f} | Epoch:{epoch:5.1f}/{args.epochs} | Train_Loss:{loss:8.3f} | Val_Acc{acc:7.3f} |'
