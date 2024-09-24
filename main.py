@@ -2,7 +2,11 @@
 author:         Tola Shobande
 name:           main.py
 date:           4/09/2024
-description:    ...
+description:    Main script for training and evaluating an image classification model.
+                Implements data loading, model initialization, training loop, and
+                evaluation procedures. Supports mixed precision training, learning
+                rate scheduling, and TensorBoard logging. Can be run in training or
+                evaluation mode based on command-line arguments.
 """
 
 import os
@@ -24,15 +28,25 @@ logger = logging.getLogger('Log')
 
 def train(train_loader, model, criterion, optimiser, scaler, scheduler, device, epoch):
     """
-    :param train_loader: training data loader
-    :param model:
-    :param criterion:
-    :param optimiser:
-    :param scaler:
-    :param scheduler:
-    :param device:
-    :param epoch:
-    :return:
+    This function performs one epoch of training, including forward and backward passes,
+    optimization steps, and metric tracking. It uses mixed precision training with
+    automatic mixed precision (AMP) for improved performance.
+
+    Args:
+        train_loader (torch.utils.data.DataLoader): DataLoader for the training dataset.
+        model (torch.nn.Module): The neural network model to train.
+        criterion (torch.nn.Module): The loss function.
+        optimiser (torch.optim.Optimizer): The optimizer for updating model parameters.
+        scaler (torch.cuda.amp.GradScaler): Gradient scaler for mixed precision training.
+        scheduler (torch.optim.lr_scheduler._LRScheduler): Learning rate scheduler.
+        device (torch.device): The device to run the training on (e.g., 'cuda' or 'cpu').
+        epoch (int): The current epoch number (used for logging).
+
+    Returns:
+        tuple: A tuple containing:
+            - average_loss (float): The average loss over the training dataset.
+            - train_accuracy (float): The overall training accuracy as a percentage.
+            - metrics (dict): A dictionary of additional metrics computed by MetricTracker.
     """
     model.train()
     losses = AverageMeter()  # Track the average loss
@@ -58,7 +72,7 @@ def train(train_loader, model, criterion, optimiser, scaler, scheduler, device, 
         scaler.update()
 
         #   Metrics Update
-        losses.update(loss.item(), images.size(0))  # Update loss
+        losses.update(loss.item(), images.size(0))  # Update Loss
         metrics_tracker.update(outputs, labels)
         _, predicted = torch.max(outputs.data, 1)  # Get predicted labels
         total += labels.size(0)
@@ -80,12 +94,30 @@ def train(train_loader, model, criterion, optimiser, scaler, scheduler, device, 
 
 def test(test_loader, model, criterion, device, eval_mode=True):
     """
-    :param test_loader:
-    :param model:
-    :param criterion:
-    :param device:
-    :param eval_mode:
-    :return:
+    This function runs the model on the test dataset, computes the loss,
+    and calculates several performance metrics including accuracy and
+    those tracked by the MetricTracker.
+
+    Args:
+        test_loader (torch.utils.data.DataLoader): DataLoader for the test dataset.
+        model (torch.nn.Module): The neural network model to evaluate.
+        criterion (torch.nn.Module): The loss function.
+        device (torch.device): The device to run the evaluation on (e.g., 'cuda' or 'cpu').
+        eval_mode (bool, optional): If True, returns only average loss and test accuracy.
+                                    If False, returns test accuracy and all tracked metrics.
+                                    Defaults to True.
+
+    Returns:
+        If eval_mode is True:
+            tuple: (average_loss, test_accuracy)
+        If eval_mode is False:
+            tuple: (test_accuracy, metrics)
+
+        where:
+            average_loss (float): The average loss over the test dataset.
+            test_accuracy (float): The overall test accuracy as a percentage.
+            metrics (dict): A dictionary of additional metrics computed by MetricTracker.
+
     """
     model.eval()
     losses = AverageMeter()
@@ -116,6 +148,8 @@ def test(test_loader, model, criterion, device, eval_mode=True):
 
 
 def main():
+    """Main Function"""
+
     """Data Loading"""
     train_data = ProjectDataset(mode='train', root_dir='dataset', seed=args.seed)
     train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True)
@@ -164,17 +198,17 @@ def main():
     criterion = torch.nn.CrossEntropyLoss()
     #   SCALER
     scaler = torch.cuda.amp.GradScaler()
-
+    #   LOG DIRECTORY
     log_dir = (f"logs/runs/"
-               f"{model.__class__.__name__}/"
+               f"{model_name}/"
                f"lr_{args.lr}_bs_{args.batch_size}/"
                f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}_"
                f"{uuid4().hex[:6]}")
-    writer = SummaryWriter(log_dir)
+    writer = SummaryWriter(log_dir)  # TENSORBOARD
     handler = logging.FileHandler(f'{log_dir}/log.txt')
     logger.addHandler(handler)
 
-    #   EXECUTION
+    """Execution"""
     if not args.eval_mode:
         if args.model_path:
             model.load_state_dict(torch.load(args.model_path))

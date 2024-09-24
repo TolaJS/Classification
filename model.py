@@ -53,17 +53,3 @@ class Classifier(nn.Module):
             The log probabilities for each class, returned as an output of the LogSoftmax layer.
         """
         return self.model(x)
-
-
-def get_model(num_classes, freeze_weights=True):
-    """
-    Creates and returns a classifier model with the specified number of output classes.
-    :param num_classes: int:
-        The number of output classes for the classifier.
-    :param freeze_weights: bool:
-        If True, the model's pre-trained weights will be frozen, meaning they will not
-        be updated during training.
-    :return:
-        A Classifier object initialized with `num_classes` and `freeze_weights` arguments.
-    """
-    return Classifier(num_classes=num_classes, freeze_weights=freeze_weights)
