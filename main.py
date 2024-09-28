@@ -62,7 +62,7 @@ def train(train_loader, model, criterion, optimiser, scaler, scheduler, device, 
         optimiser.zero_grad()
 
         #   Forward pass
-        with torch.cuda.amp.autocast():
+        with torch.amp.autocast():
             outputs = model(images)
             loss = criterion(outputs, labels)
 
@@ -121,7 +121,7 @@ def test(test_loader, model, criterion, device, eval_mode=True):
     """
     model.eval()
     losses = AverageMeter()
-    metrics_tracker = MetricTracker(args.num_classes)
+    metrics_tracker = MetricTracker(args.num_classes).to(device)
     correct = 0
     total = 0
 
@@ -129,7 +129,7 @@ def test(test_loader, model, criterion, device, eval_mode=True):
         for images, labels in test_loader:
             images, labels = images.to(device), labels.to(device)
 
-            with torch.cuda.amp.autocast():
+            with torch.amp.autocast():
                 outputs = model(images)
                 loss = criterion(outputs, labels)
 
@@ -241,6 +241,8 @@ def main():
             filename = f"Model-{model_name}-lr_{args.lr}_bs_{args.batch_size}-E{epoch + 1}.pth"
             save_path = os.path.join(args.save_path, filename)
             torch.save(model.state_dict(), save_path)
+        logger.info("=> Training Finished")
+        handler.close()
 
 
 if __name__ == '__main__':
